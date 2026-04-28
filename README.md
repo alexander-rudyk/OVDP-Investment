@@ -219,6 +219,11 @@ See [prisma/schema.prisma](./prisma/schema.prisma).
 ## Docker / Portainer
 
 The repository includes a production Dockerfile and a Portainer-friendly compose file.
+CI publishes the image to GitHub Container Registry:
+
+```text
+ghcr.io/alexander-rudyk/ovdp-investment:latest
+```
 
 Build locally:
 
@@ -232,9 +237,18 @@ Run the production stack locally:
 docker compose -f docker-compose.portainer.yml up -d
 ```
 
-For Portainer, create a stack from `docker-compose.portainer.yml` and provide these environment variables:
+For Portainer, create a stack from `docker-compose.portainer.yml`. The stack pulls the app image from GHCR by default.
+
+If the package is private, configure registry auth in Portainer:
+
+- Registry URL: `ghcr.io`
+- Username: your GitHub username
+- Password: a GitHub PAT with `read:packages`
+
+Provide these environment variables:
 
 ```env
+IMAGE_TAG=latest
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=change-me
 POSTGRES_DB=ovdp_bot
@@ -255,6 +269,11 @@ The HTTP healthcheck is available at:
 
 Use `RUN_MIGRATIONS=false` only if migrations are handled by a separate release step.
 
+Images published by CI:
+
+- `ghcr.io/alexander-rudyk/ovdp-investment:latest` for the default branch
+- `ghcr.io/alexander-rudyk/ovdp-investment:sha-<commit>` for immutable deploys
+
 ## CI
 
 GitHub Actions workflow: `.github/workflows/ci.yml`.
@@ -266,7 +285,8 @@ On pull requests and pushes to `main`/`master`, CI runs:
 - `npm run build`
 - `npm run lint`
 - `npm test -- --runInBand`
-- `docker build -t ovdp-invest-bot:ci .`
+- Docker build on pull requests
+- Docker build and push to `ghcr.io/alexander-rudyk/ovdp-investment` on pushes to `main`/`master`
 
 ## Tests
 

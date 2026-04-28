@@ -1,9 +1,6 @@
 services:
   app:
-    image: ovdp-invest-bot:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/alexander-rudyk/ovdp-investment:${IMAGE_TAG:-latest}
     restart: unless-stopped
     depends_on:
       postgres:
