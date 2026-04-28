@@ -12,6 +12,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { PortfolioModule } from './portfolio/portfolio.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { PurchasesModule } from './purchases/purchases.module';
+import { HealthController } from './health.controller';
 
 @Module({
   imports: [
@@ -39,5 +40,6 @@ import { PurchasesModule } from './purchases/purchases.module';
     BotModule,
     JobsModule,
   ],
+  controllers: [HealthController],
 })
 export class AppModule {}

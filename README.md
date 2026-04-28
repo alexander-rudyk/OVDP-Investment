@@ -198,7 +198,7 @@ All monetary calculations use `decimal.js`; values are stored in PostgreSQL `Dec
 
 The worker:
 
-- fetches and stores the daily NBU USD/UAH rate
+- fetches and stores the daily NBU USD/UAH and EUR/UAH rates
 - recalculates all active portfolios
 - marks matured purchases
 - sends maturity summaries
@@ -212,8 +212,61 @@ Prisma models:
 - `purchases`
 - `fx_rates`
 - `alerts`
+- `fx_notification_settings`
 
 See [prisma/schema.prisma](./prisma/schema.prisma).
+
+## Docker / Portainer
+
+The repository includes a production Dockerfile and a Portainer-friendly compose file.
+
+Build locally:
+
+```bash
+docker build -t ovdp-invest-bot:latest .
+```
+
+Run the production stack locally:
+
+```bash
+docker compose -f docker-compose.portainer.yml up -d
+```
+
+For Portainer, create a stack from `docker-compose.portainer.yml` and provide these environment variables:
+
+```env
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=change-me
+POSTGRES_DB=ovdp_bot
+APP_PORT=3000
+TELEGRAM_BOT_TOKEN=123456:replace-me
+TELEGRAM_BOT_MODE=polling
+TELEGRAM_ADMIN_USER_IDS=123456789
+NBU_API_URL=https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange
+RUN_MIGRATIONS=true
+```
+
+The app container runs `prisma migrate deploy` on startup when `RUN_MIGRATIONS=true`.
+The HTTP healthcheck is available at:
+
+```text
+/health
+```
+
+Use `RUN_MIGRATIONS=false` only if migrations are handled by a separate release step.
+
+## CI
+
+GitHub Actions workflow: `.github/workflows/ci.yml`.
+
+On pull requests and pushes to `main`/`master`, CI runs:
+
+- `npm ci`
+- `npm run prisma:generate`
+- `npm run build`
+- `npm run lint`
+- `npm test -- --runInBand`
+- `docker build -t ovdp-invest-bot:ci .`
 
 ## Tests
 
