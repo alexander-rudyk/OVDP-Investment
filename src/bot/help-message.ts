@@ -1,3 +1,16 @@
+export function buildStartMessage(): string {
+  return [
+    '🇺🇦 OVDP Bot',
+    '',
+    'Я допомагаю вести облік інвестицій в українські ОВДП: покупки, очікувані виплати, порівняння з USD-сценарієм, алерти й daily FX notification.',
+    '',
+    'Мінімум для старту:',
+    '/buy — додати покупку',
+    '/portfolio — подивитися портфель',
+    '/help — усі команди та приклади',
+  ].join('\n');
+}
+
 export function buildHelpMessage(isAdmin: boolean): string {
   const lines = [
     '🇺🇦 OVDP Bot — трекер інвестицій в ОВДП',

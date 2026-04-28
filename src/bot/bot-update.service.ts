@@ -10,7 +10,7 @@ import { PortfolioService } from '../portfolio/portfolio.service';
 import { PurchasesService } from '../purchases/purchases.service';
 import { commandArgs, requireTelegramIdentity } from './command-parser';
 import { GRAMMY_BOT } from './bot.tokens';
-import { buildHelpMessage, buildPortfolioHelpMessage } from './help-message';
+import { buildHelpMessage, buildPortfolioHelpMessage, buildStartMessage } from './help-message';
 import { html } from './html';
 import { toPublicErrorMessage } from './public-error-message';
 
@@ -50,7 +50,11 @@ export class BotUpdateService implements OnModuleInit, OnApplicationShutdown {
       this.logger.error('Telegram update failed', error.error);
     });
 
-    this.bot.command(['start', 'help', 'hepl'], async (ctx) => {
+    this.bot.command('start', async (ctx) => {
+      await ctx.reply(buildStartMessage());
+    });
+
+    this.bot.command(['help', 'hepl'], async (ctx) => {
       const topic = commandArgs(ctx)[0]?.toLowerCase();
       if (topic === 'portfolio' || topic === 'портфель') {
         await ctx.reply(buildPortfolioHelpMessage());
