@@ -260,26 +260,37 @@ export class BotUpdateService implements OnModuleInit, OnApplicationShutdown {
 
   private async handleCloseBuy(ctx: Context): Promise<void> {
     const args = commandArgs(ctx);
-    if (args.length !== 2 && args.length !== 3) {
-      throw new Error('Використання: /close_buy purchase_id received_uah [close_date]');
+    if (args.length < 2 || args.length > 4) {
+      throw new Error('Використання: /close_buy purchase_id [quantity] received_uah [close_date]');
     }
     const identity = requireTelegramIdentity(ctx);
+    const closeArgs = parseCloseBuyArgs(args);
     const result = await this.purchases.close({
-      purchaseId: args[0],
-      receivedUah: args[1],
-      closeDate: args[2],
+      purchaseId: closeArgs.purchaseId,
+      quantity: closeArgs.quantity,
+      receivedUah: closeArgs.receivedUah,
+      closeDate: closeArgs.closeDate,
       telegramUserId: identity.telegramUserId,
     });
 
     await ctx.reply(
       [
-        `🏁 Покупку <code>${html(result.purchase.id.slice(0, 8))}</code> закрито достроково`,
-        `<b>${html(result.purchase.bond.isin)} · ${result.purchase.quantity} шт.</b>`,
+        result.remainingPurchase
+          ? `🏁 Частково закрито <code>${html(result.purchase.id.slice(0, 8))}</code>`
+          : `🏁 Покупку <code>${html(result.purchase.id.slice(0, 8))}</code> закрито достроково`,
+        `<b>${html(result.purchase.bond.isin)} · ${result.closedQuantity} шт.</b>`,
         `Дата закриття: ${result.purchase.closedAt?.toISOString().slice(0, 10) ?? '-'}`,
         `Інвестовано: ${formatUah(result.purchase.totalUah.toString())}`,
         `Отримано: ${formatUah(result.receivedUah)} (${formatUsd(result.receivedUsd)})`,
         `USD/UAH закриття: ${result.usdRateAtClose.toDecimalPlaces(4).toFixed(4)}`,
         `Результат: <b>${formatSignedUah(result.profitUah)}</b> / <b>${formatSignedUsd(result.profitUsd)}</b>`,
+        ...(result.remainingPurchase
+          ? [
+              '',
+              `Активний залишок: <code>${html(result.remainingPurchase.id.slice(0, 8))}</code> · ${result.remainingQuantity} шт.`,
+              `Залишкова cost basis: ${formatUah(result.remainingPurchase.totalUah.toString())}`,
+            ]
+          : []),
       ].join('\n'),
       { parse_mode: 'HTML' },
     );
@@ -382,4 +393,26 @@ function parseFxNotifyOnArgs(args: string[]): { timeOfDay: string; currencies: s
     return { timeOfDay: first, currencies: args[1] ?? 'USD,EUR' };
   }
   return { timeOfDay: '09:00', currencies: first };
+}
+
+function parseCloseBuyArgs(args: string[]): {
+  purchaseId: string;
+  quantity?: string;
+  receivedUah: string;
+  closeDate?: string;
+} {
+  if (args.length === 2) {
+    return { purchaseId: args[0], receivedUah: args[1] };
+  }
+  if (args.length === 3 && isIsoDateArg(args[2])) {
+    return { purchaseId: args[0], receivedUah: args[1], closeDate: args[2] };
+  }
+  if (args.length === 3) {
+    return { purchaseId: args[0], quantity: args[1], receivedUah: args[2] };
+  }
+  return { purchaseId: args[0], quantity: args[1], receivedUah: args[2], closeDate: args[3] };
+}
+
+function isIsoDateArg(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }

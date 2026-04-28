@@ -19,6 +19,7 @@ export interface EditPurchaseInput {
 
 export interface ClosePurchaseInput {
   purchaseId: string;
+  quantity?: string;
   receivedUah: string;
   closeDate?: string;
   telegramUserId: bigint;

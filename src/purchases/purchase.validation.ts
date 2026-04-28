@@ -24,6 +24,7 @@ export interface ValidatedEditPurchaseInput {
 
 export interface ValidatedClosePurchaseInput {
   purchaseId: string;
+  quantity?: number;
   receivedUah: string;
   closeDate: Date;
   telegramUserId: bigint;
@@ -68,6 +69,10 @@ export function validateEditPurchaseInput(input: EditPurchaseInput): ValidatedEd
 }
 
 export function validateClosePurchaseInput(input: ClosePurchaseInput): ValidatedClosePurchaseInput {
+  const quantity = input.quantity === undefined ? undefined : Number(input.quantity);
+  if (quantity !== undefined && (!Number.isInteger(quantity) || quantity <= 0)) {
+    throw new Error('quantity має бути цілим числом більше 0');
+  }
   const receivedUah = positiveDecimal(input.receivedUah, 'received_uah');
   const closeDate = input.closeDate ? parseIsoDate(input.closeDate, 'close_date') : todayUtc();
   if (closeDate > todayUtc()) {
@@ -76,6 +81,7 @@ export function validateClosePurchaseInput(input: ClosePurchaseInput): Validated
 
   return {
     purchaseId: validatePurchaseId(input.purchaseId),
+    quantity,
     receivedUah: receivedUah.toFixed(),
     closeDate,
     telegramUserId: input.telegramUserId,

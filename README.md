@@ -153,7 +153,13 @@ Close a purchase early:
 /close_buy clv8k3a1 20100 2026-04-28
 ```
 
-`received_uah` is the actual net UAH amount received after early sale/closure. The bot stores the close date, USD/UAH rate for that date, final UAH/USD received values, and final profit/loss.
+Close part of a purchase early:
+
+```text
+/close_buy clv8k3a1 5 5300 2026-04-28
+```
+
+`received_uah` is the actual net UAH amount received after early sale/closure. If `quantity` is provided, only that number of bonds is closed. The bot creates a separate `CLOSED` record for the closed part and keeps the remaining quantity active with proportional cost basis.
 
 Create or update an alert:
 
