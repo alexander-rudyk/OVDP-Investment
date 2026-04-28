@@ -1,0 +1,119 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum BondType {
+  COUPON
+  ZERO_COUPON
+}
+
+enum CouponFrequency {
+  NONE
+  MONTHLY
+  QUARTERLY
+  SEMI_ANNUAL
+  ANNUAL
+}
+
+enum PurchaseStatus {
+  ACTIVE
+  CLOSED
+  MATURED
+  DELETED
+}
+
+model Bond {
+  id              String          @id @default(cuid())
+  isin            String          @unique
+  maturityDate    DateTime        @map("maturity_date") @db.Date
+  nominal         Decimal         @db.Decimal(18, 4)
+  couponRate      Decimal         @map("coupon_rate") @db.Decimal(9, 6)
+  couponFrequency CouponFrequency @map("coupon_frequency")
+  type            BondType
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  purchases       Purchase[]
+
+  @@map("bonds")
+}
+
+model Purchase {
+  id                    String    @id @default(cuid())
+  telegramUserId        BigInt    @map("telegram_user_id")
+  chatId                BigInt    @map("chat_id")
+  bondId                String    @map("bond_id")
+  bond                  Bond      @relation(fields: [bondId], references: [id], onDelete: Restrict)
+  quantity              Int
+  priceUah              Decimal   @map("price_uah") @db.Decimal(18, 4)
+  commissionUah         Decimal   @map("commission_uah") @db.Decimal(18, 4)
+  totalUah              Decimal   @map("total_uah") @db.Decimal(18, 4)
+  usdRateAtPurchase     Decimal   @map("usd_rate_at_purchase") @db.Decimal(18, 8)
+  totalUsdAtPurchase    Decimal   @map("total_usd_at_purchase") @db.Decimal(18, 8)
+  purchaseDate          DateTime  @default(now()) @map("purchase_date")
+  status                PurchaseStatus @default(ACTIVE)
+  closedAt              DateTime? @map("closed_at")
+  deletedAt             DateTime? @map("deleted_at")
+  maturedAt             DateTime? @map("matured_at")
+  finalUsdRate          Decimal?  @map("final_usd_rate") @db.Decimal(18, 8)
+  finalReceivedUah      Decimal?  @map("final_received_uah") @db.Decimal(18, 4)
+  finalReceivedUsd      Decimal?  @map("final_received_usd") @db.Decimal(18, 8)
+  finalProfitUah        Decimal?  @map("final_profit_uah") @db.Decimal(18, 4)
+  finalProfitUsd        Decimal?  @map("final_profit_usd") @db.Decimal(18, 8)
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@index([telegramUserId])
+  @@index([bondId])
+  @@index([status])
+  @@index([maturedAt])
+  @@map("purchases")
+}
+
+model FxRate {
+  id        String   @id @default(cuid())
+  currency  String   @db.VarChar(3)
+  date      DateTime @db.Date
+  rate      Decimal  @db.Decimal(18, 8)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([currency, date])
+  @@map("fx_rates")
+}
+
+model Alert {
+  id                 String    @id @default(cuid())
+  telegramUserId     BigInt    @map("telegram_user_id")
+  chatId             BigInt    @map("chat_id")
+  usdLossPercent     Decimal   @map("usd_loss_percent") @db.Decimal(9, 4)
+  enabled            Boolean   @default(true)
+  lastTriggeredAt    DateTime? @map("last_triggered_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@unique([telegramUserId, chatId])
+  @@index([enabled])
+  @@map("alerts")
+}
+
+model FxNotificationSetting {
+  id              String    @id @default(cuid())
+  telegramUserId  BigInt    @map("telegram_user_id")
+  chatId          BigInt    @map("chat_id")
+  enabled         Boolean   @default(true)
+  timeOfDay       String    @default("09:00") @map("time_of_day") @db.VarChar(5)
+  timeZone        String    @default("Europe/Kyiv") @map("time_zone")
+  currencies      String    @default("USD,EUR")
+  lastSentForDate DateTime? @map("last_sent_for_date") @db.Date
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([telegramUserId, chatId])
+  @@index([enabled, timeOfDay])
+  @@map("fx_notification_settings")
+}
