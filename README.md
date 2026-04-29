@@ -1,218 +1,173 @@
 # OVDP Investment Telegram Bot
 
-NestJS Telegram bot for tracking Ukrainian government bond (OVDP) purchases, FX exposure, expected payouts, maturity summaries, and USD-loss alerts.
+Production-ready Telegram bot for tracking Ukrainian government bond (OVDP) investments.
 
-## Stack
+The project is built as a backend engineering portfolio piece: clean NestJS modules, deterministic financial calculations, PostgreSQL persistence, Prisma migrations, BullMQ jobs, Redis caching, Docker deployment, and GitHub Actions CI.
 
-- Node.js 20+
+[![CI](https://github.com/alexander-rudyk/OVDP-Investment/actions/workflows/ci.yml/badge.svg)](https://github.com/alexander-rudyk/OVDP-Investment/actions/workflows/ci.yml)
+
+## What It Does
+
+- Tracks manually registered OVDP bonds.
+- Stores purchases with quantity, amount, commission, and purchase date.
+- Fetches historical USD/UAH and EUR/UAH rates from the NBU API.
+- Calculates expected payout, UAH result, and comparison against a USD-hold scenario.
+- Supports full and partial early closure of a purchase.
+- Sends daily FX notifications with rate movement.
+- Sends alerts when the portfolio underperforms a configured USD threshold.
+- Handles bond maturity and sends final summaries.
+- Runs daily background maintenance jobs through BullMQ.
+
+## Tech Stack
+
+- Node.js 20
+- TypeScript
 - NestJS
 - PostgreSQL
 - Prisma ORM
 - grammY
 - BullMQ
 - Redis
-- decimal.js for deterministic money calculations
+- decimal.js
+- Docker / Docker Compose
+- GitHub Actions
 
 ## Architecture
 
 The application is split into focused modules:
 
-- `bonds`: manual bond registry and ISIN/bond validation
-- `purchases`: purchase recording and USD/UAH capture at purchase time
-- `fx`: NBU USD/UAH fetch, Redis cache, and historical persistence
-- `portfolio`: pure deterministic payout and comparison calculations
-- `notifications`: alert persistence and Telegram delivery
-- `bot`: grammY command handlers only
-- `jobs`: BullMQ daily maintenance worker
+- `bonds`: manual bond registry, ISIN validation, admin-only registry operations
+- `purchases`: purchase tracking, editing, soft deletion, full and partial closure
+- `fx`: NBU exchange-rate fetch, Redis cache, historical rate storage
+- `portfolio`: deterministic payout and comparison calculations
+- `notifications`: Telegram delivery, FX notifications, portfolio alerts
+- `bot`: grammY command handlers and user-facing formatting
+- `jobs`: BullMQ daily maintenance worker and scheduler
 
-The portfolio calculator is intentionally pure and testable. It does not read from the database, call Telegram, or fetch FX.
+The portfolio calculator is intentionally pure and testable. It does not read from the database, call Telegram, or fetch FX rates.
 
-## Setup
+More detail: [docs/architecture.md](./docs/architecture.md).
 
-1. Install dependencies:
+## Core Commands
+
+Bot messages are in Ukrainian. Run `/help` in Telegram for full command details and examples.
+
+```text
+/start
+/help
+/help portfolio
+/portfolio
+```
+
+Purchase flow:
+
+```text
+/buy UA4000227045 25 24500 50 2026-04-01
+/edit_buy cmoiv0c5 19 19500 68 2026-04-01
+/delete_buy cmoiv0c5
+/close_buy cmoiv0c5 20100 2026-04-28
+/close_buy cmoiv0c5 5 5300 2026-04-28
+```
+
+Alerts and FX notifications:
+
+```text
+/alert usd_loss_percent 3
+/fx_notify on 09:00 USD,EUR
+/fx_notify status
+/fx_notify off
+```
+
+Admin-only bond registry:
+
+```text
+/bonds
+/add_bond UA4000227045 2027-05-26 1000 16.5 semi_annual coupon
+/edit_bond UA4000227045 2027-05-26 1000 17.25 semi_annual coupon
+/run_daily_job
+```
+
+Admin commands require `TELEGRAM_ADMIN_USER_IDS`.
+
+## Calculation Model
+
+For each active purchase:
+
+```text
+expected_total_uah = nominal * quantity + remaining coupons
+expected_total_usd = expected_total_uah / current_usd_rate
+usd_hold = total_uah / usd_rate_at_purchase
+delta_vs_usd = expected_total_usd - usd_hold
+delta_vs_uah = expected_total_uah - total_uah
+```
+
+Important notes:
+
+- `amount_uah` is the full purchase amount for the deal, without commission.
+- `total_uah = amount_uah + commission_uah`.
+- The USD comparison is not guaranteed income; it is a scenario comparison at the current FX rate.
+- Coupon payments are counted deterministically by walking backward from maturity using the registered coupon frequency.
+- All monetary calculations use `decimal.js`, never JavaScript floating point arithmetic.
+
+## Local Development
+
+Install dependencies:
 
 ```bash
 npm install
 ```
 
-2. Start infrastructure:
+Start local infrastructure:
 
 ```bash
 docker compose up -d
 ```
 
-3. Configure environment:
+Configure environment:
 
 ```bash
 cp .env.example .env
 ```
 
-Set `TELEGRAM_BOT_TOKEN` to the token from BotFather.
-Set `TELEGRAM_ADMIN_USER_IDS` to your Telegram numeric user id. Multiple admins can be comma-separated.
+Set:
 
-4. Generate Prisma client and run migrations:
+```env
+TELEGRAM_BOT_TOKEN=123456:replace-me
+TELEGRAM_ADMIN_USER_IDS=123456789
+```
+
+Run Prisma and start the app:
 
 ```bash
 npm run prisma:generate
 npm run prisma:migrate
-```
-
-5. Run the app:
-
-```bash
 npm run start:dev
 ```
 
-For workers without Telegram polling, set `TELEGRAM_BOT_MODE=disabled`.
-
-## Commands
-
-Bot messages and `/help` are in Ukrainian. Run `/help` in Telegram to see argument descriptions, allowed values, and examples.
-Bond registry commands are admin-only and require your Telegram id in `TELEGRAM_ADMIN_USER_IDS`.
-
-List registered bonds:
+Health endpoint:
 
 ```text
-/bonds
+GET /health
 ```
 
-Register a coupon bond:
+## Environment Variables
 
-```text
-/add_bond UA4000227045 2027-05-26 1000 16.5 semi_annual coupon
-```
+See [.env.example](./.env.example).
 
-Register a zero-coupon bond:
-
-```text
-/add_bond UA4000227045 2027-05-26 1000 0 none zero_coupon
-```
-
-Edit a registered bond:
-
-```text
-/edit_bond UA4000227045 2027-05-26 1000 17.25 semi_annual coupon
-```
-
-Run the daily maintenance job manually:
-
-```text
-/run_daily_job
-```
-
-This enqueues the same BullMQ job that updates FX, handles maturities, and sends alerts.
-
-Record a purchase using today's NBU USD/UAH rate:
-
-```text
-/buy UA4000227045 25 24500 50
-```
-
-Record a purchase for a historical date:
-
-```text
-/buy UA4000227045 25 24500 50 2026-04-01
-```
-
-The bot stores:
-
-- `amount_uah` is the total purchase amount for the whole deal, without commission.
-- `total_uah = amount_uah + commission_uah`
-- NBU USD/UAH rate for the purchase date. If `purchase_date` is omitted, today's date is used.
-- `total_usd_at_purchase = total_uah / usd_rate_at_purchase`
-
-Show active portfolio:
-
-```text
-/portfolio
-```
-
-Explain portfolio fields:
-
-```text
-/help portfolio
-```
-
-The portfolio output includes a short purchase `ID`. Use that ID to edit, delete, or close a purchase.
-
-Edit a purchase and recalculate FX for the purchase date:
-
-```text
-/edit_buy clv8k3a1 19 19500 68 2026-04-01
-```
-
-Delete a purchase from the active portfolio:
-
-```text
-/delete_buy clv8k3a1
-```
-
-Close a purchase early:
-
-```text
-/close_buy clv8k3a1 20100 2026-04-28
-```
-
-Close part of a purchase early:
-
-```text
-/close_buy clv8k3a1 5 5300 2026-04-28
-```
-
-`received_uah` is the actual net UAH amount received after early sale/closure. If `quantity` is provided, only that number of bonds is closed. The bot creates a separate `CLOSED` record for the closed part and keeps the remaining quantity active with proportional cost basis.
-
-Create or update an alert:
-
-```text
-/alert usd_loss_percent 3
-```
-
-The alert fires when a purchase has `delta_vs_usd_percent < -3`.
-
-Configure daily FX notification:
-
-```text
-/fx_notify on 09:00 USD,EUR
-/fx_notify on EUR
-/fx_notify status
-/fx_notify off
-```
-
-The bot sends the NBU USD/UAH and EUR/UAH rate at the selected Kyiv time with a green/red movement marker versus the previous day.
-
-## Calculation Rules
-
-For each active purchase:
-
-- `expected_total_uah = nominal * quantity + remaining coupons`
-- `expected_total_usd = expected_total_uah / current_usd_rate`
-- `usd_hold = total_uah / usd_rate_at_purchase`
-- `uah_hold = total_uah`
-- `delta_vs_usd = expected_total_usd - usd_hold`
-- `delta_vs_uah = expected_total_uah - uah_hold`
-
-Coupon payments are counted by walking backward from maturity using the registered coupon frequency. This is deterministic and avoids external bond APIs. For example, a semi-annual coupon bond with one year remaining has two remaining coupon payments.
-
-All monetary calculations use `decimal.js`; values are stored in PostgreSQL `Decimal` columns.
-
-## Daily Job
-
-`DailyMaintenanceScheduler` enqueues a BullMQ job:
-
-- at startup
-- every day at 09:00 Europe/Kyiv
-
-The worker:
-
-- fetches and stores the daily NBU USD/UAH and EUR/UAH rates
-- recalculates all active portfolios
-- marks matured purchases
-- sends maturity summaries
-- triggers USD-loss alerts
+| Variable | Description |
+| --- | --- |
+| `DATABASE_URL` | PostgreSQL connection string |
+| `REDIS_HOST` | Redis host |
+| `REDIS_PORT` | Redis port |
+| `TELEGRAM_BOT_TOKEN` | Token from BotFather |
+| `TELEGRAM_BOT_MODE` | `polling` or `disabled` |
+| `TELEGRAM_ADMIN_USER_IDS` | Comma-separated Telegram numeric user ids |
+| `NBU_API_URL` | NBU exchange API URL |
+| `PORT` | HTTP server port |
 
 ## Database
 
-Prisma models:
+Main Prisma models:
 
 - `bonds`
 - `purchases`
@@ -220,11 +175,10 @@ Prisma models:
 - `alerts`
 - `fx_notification_settings`
 
-See [prisma/schema.prisma](./prisma/schema.prisma).
+Schema: [prisma/schema.prisma](./prisma/schema.prisma)
 
 ## Docker / Portainer
 
-The repository includes a production Dockerfile and a Portainer-friendly compose file.
 CI publishes the image to GitHub Container Registry:
 
 ```text
@@ -243,7 +197,7 @@ Run the production stack locally:
 docker compose -f docker-compose.portainer.yml up -d
 ```
 
-For Portainer, create a stack from `docker-compose.portainer.yml`. The stack pulls the app image from GHCR by default.
+For Portainer, create a stack from [docker-compose.portainer.yml](./docker-compose.portainer.yml). The stack pulls the app image from GHCR by default.
 
 If the package is private, configure registry auth in Portainer:
 
@@ -251,38 +205,13 @@ If the package is private, configure registry auth in Portainer:
 - Username: your GitHub username
 - Password: a GitHub PAT with `read:packages`
 
-Provide these environment variables:
+Deployment details: [docs/deployment.md](./docs/deployment.md).
 
-```env
-IMAGE_TAG=latest
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=change-me
-POSTGRES_DB=ovdp_bot
-APP_PORT=3000
-TELEGRAM_BOT_TOKEN=123456:replace-me
-TELEGRAM_BOT_MODE=polling
-TELEGRAM_ADMIN_USER_IDS=123456789
-NBU_API_URL=https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange
-RUN_MIGRATIONS=true
-```
-
-The app container runs `prisma migrate deploy` on startup when `RUN_MIGRATIONS=true`.
-The HTTP healthcheck is available at:
-
-```text
-/health
-```
-
-Use `RUN_MIGRATIONS=false` only if migrations are handled by a separate release step.
-
-Images published by CI:
-
-- `ghcr.io/alexander-rudyk/ovdp-investment:latest` for the default branch
-- `ghcr.io/alexander-rudyk/ovdp-investment:sha-<commit>` for immutable deploys
+Temporary Postgres bridge for server debugging: [docs/temporary-postgres-bridge.md](./docs/temporary-postgres-bridge.md).
 
 ## CI
 
-GitHub Actions workflow: `.github/workflows/ci.yml`.
+GitHub Actions workflow: [.github/workflows/ci.yml](./.github/workflows/ci.yml)
 
 On pull requests and pushes to `main`/`master`, CI runs:
 
@@ -291,13 +220,30 @@ On pull requests and pushes to `main`/`master`, CI runs:
 - `npm run build`
 - `npm run lint`
 - `npm test -- --runInBand`
-- Docker build on pull requests
-- Docker build and push to `ghcr.io/alexander-rudyk/ovdp-investment` on pushes to `main`/`master`
+- Docker build
+- Docker push to GHCR on default-branch pushes
 
-## Tests
+## Quality
+
+Run locally:
 
 ```bash
-npm test
+npm run build
+npm run lint
+npm test -- --runInBand
 ```
 
-The included tests cover deterministic coupon and zero-coupon portfolio calculations.
+The test suite covers deterministic portfolio calculations, validation, public error mapping, FX notification parsing, and money formatting.
+
+## Security
+
+- No external bond APIs are used. Bond registry is manual and admin-only.
+- User-facing errors are sanitized; stack traces and Prisma internals stay in logs.
+- Telegram admin operations are gated by `TELEGRAM_ADMIN_USER_IDS`.
+- Production Postgres is not exposed by default in the Portainer compose file.
+
+Security policy: [SECURITY.md](./SECURITY.md)
+
+## License
+
+MIT. See [LICENSE](./LICENSE).

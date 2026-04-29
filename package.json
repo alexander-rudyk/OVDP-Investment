@@ -3,7 +3,27 @@
   "version": "1.0.0",
   "private": true,
   "description": "Production-ready Telegram bot for tracking Ukrainian OVDP investments.",
-  "license": "UNLICENSED",
+  "license": "MIT",
+  "author": "Alexander Rudyk",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexander-rudyk/OVDP-Investment.git"
+  },
+  "bugs": {
+    "url": "https://github.com/alexander-rudyk/OVDP-Investment/issues"
+  },
+  "homepage": "https://github.com/alexander-rudyk/OVDP-Investment#readme",
+  "keywords": [
+    "ovdp",
+    "ukraine",
+    "government-bonds",
+    "telegram-bot",
+    "nestjs",
+    "prisma",
+    "postgresql",
+    "bullmq",
+    "finance"
+  ],
   "scripts": {
     "build": "nest build",
     "start": "node dist/main.js",
