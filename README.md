@@ -17,6 +17,7 @@ The project is built as a backend engineering portfolio piece: clean NestJS modu
 - Sends alerts when the portfolio underperforms a configured USD threshold.
 - Handles bond maturity and sends final summaries.
 - Runs daily background maintenance jobs through BullMQ.
+- Stores Telegram command audit logs with automatic retention cleanup.
 
 ## Tech Stack
 
@@ -41,6 +42,7 @@ The application is split into focused modules:
 - `fx`: NBU exchange-rate fetch, Redis cache, historical rate storage
 - `portfolio`: deterministic payout and comparison calculations
 - `notifications`: Telegram delivery, FX notifications, portfolio alerts
+- `audit`: command usage audit logs and retention rotation
 - `bot`: grammY command handlers and user-facing formatting
 - `jobs`: BullMQ daily maintenance worker and scheduler
 
@@ -85,6 +87,7 @@ Admin-only bond registry:
 /add_bond UA4000227045 2027-05-26 1000 16.5 semi_annual coupon
 /edit_bond UA4000227045 2027-05-26 1000 17.25 semi_annual coupon
 /run_daily_job
+/audit_logs 20 @username failure
 ```
 
 Admin commands require `TELEGRAM_ADMIN_USER_IDS`.
@@ -163,6 +166,8 @@ See [.env.example](./.env.example).
 | `TELEGRAM_BOT_MODE` | `polling` or `disabled` |
 | `TELEGRAM_ADMIN_USER_IDS` | Comma-separated Telegram numeric user ids |
 | `NBU_API_URL` | NBU exchange API URL |
+| `AUDIT_LOG_RETENTION_DAYS` | Delete command audit logs older than this many days |
+| `AUDIT_LOG_MAX_ROWS` | Hard cap for command audit rows retained after rotation |
 | `PORT` | HTTP server port |
 
 ## Database
@@ -174,6 +179,7 @@ Main Prisma models:
 - `fx_rates`
 - `alerts`
 - `fx_notification_settings`
+- `command_audit_logs`
 
 Schema: [prisma/schema.prisma](./prisma/schema.prisma)
 

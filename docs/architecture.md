@@ -11,6 +11,7 @@ src/
   fx/              NBU exchange rates, Redis cache, historical persistence
   portfolio/       Pure calculation layer and portfolio snapshots
   notifications/  Telegram delivery, alerts, daily FX notifications
+  audit/           Telegram command audit logs and retention rotation
   bot/             grammY command handlers and message formatting
   jobs/            BullMQ queues, processors, scheduled maintenance
   prisma/          Prisma client lifecycle
@@ -25,6 +26,7 @@ src/
 - Telegram handlers parse command arguments and delegate to services.
 - BullMQ handles background maintenance and alert workflows.
 - Redis is used for FX cache and BullMQ infrastructure.
+- Telegram command usage is recorded in `command_audit_logs` for operational visibility.
 
 ## Purchase Lifecycle
 
@@ -64,6 +66,32 @@ The daily job:
 - handles matured purchases
 - sends maturity summaries
 - triggers portfolio alerts
+- rotates command audit logs by age and max row count
+
+## Audit Logs
+
+Every handled Telegram command writes an audit row with:
+
+- Telegram user and chat ids
+- username/name snapshot
+- command and parsed arguments
+- success/failure status
+- public error message when available
+- handler duration
+
+Rotation is run by daily maintenance. Defaults:
+
+```text
+AUDIT_LOG_RETENTION_DAYS=90
+AUDIT_LOG_MAX_ROWS=50000
+```
+
+Admin query command:
+
+```text
+/audit_logs [limit] [@username] [success|failure]
+/audit_logs n=20 user=@username status=failure
+```
 
 Manual trigger:
 

@@ -1,5 +1,6 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
+import { AuditLogsModule } from '../audit/audit-logs.module';
 import { FxModule } from '../fx/fx.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PortfolioModule } from '../portfolio/portfolio.module';
@@ -14,6 +15,7 @@ import { DAILY_MAINTENANCE_QUEUE } from './jobs.constants';
     FxModule,
     PortfolioModule,
     NotificationsModule,
+    AuditLogsModule,
   ],
   providers: [DailyMaintenanceService, DailyMaintenanceScheduler, DailyMaintenanceProcessor],
   exports: [DailyMaintenanceService],

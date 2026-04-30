@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Bot } from 'grammy';
+import { AuditLogsModule } from '../audit/audit-logs.module';
 import { BondsModule } from '../bonds/bonds.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -10,7 +11,7 @@ import { BotUpdateService } from './bot-update.service';
 import { GRAMMY_BOT } from './bot.tokens';
 
 @Module({
-  imports: [BondsModule, PurchasesModule, PortfolioModule, NotificationsModule, JobsModule],
+  imports: [AuditLogsModule, BondsModule, PurchasesModule, PortfolioModule, NotificationsModule, JobsModule],
   providers: [
     {
       provide: GRAMMY_BOT,

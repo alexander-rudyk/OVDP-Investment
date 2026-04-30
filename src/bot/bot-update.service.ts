@@ -1,6 +1,7 @@
-import { Inject, Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
+import { HttpException, Inject, Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Bot, Context } from 'grammy';
+import { AuditLogsService } from '../audit/audit-logs.service';
 import { BondsService } from '../bonds/bonds.service';
 import { formatSignedUah, formatSignedUsd, formatUah, formatUsd } from '../common/decimal/money';
 import { DailyMaintenanceService } from '../jobs/daily-maintenance.service';
@@ -21,6 +22,7 @@ export class BotUpdateService implements OnModuleInit, OnApplicationShutdown {
   constructor(
     @Inject(GRAMMY_BOT) private readonly bot: Bot,
     private readonly config: ConfigService,
+    private readonly auditLogs: AuditLogsService,
     private readonly bonds: BondsService,
     private readonly purchases: PurchasesService,
     private readonly portfolio: PortfolioService,
@@ -50,18 +52,18 @@ export class BotUpdateService implements OnModuleInit, OnApplicationShutdown {
       this.logger.error('Telegram update failed', error.error);
     });
 
-    this.bot.command('start', async (ctx) => {
+    this.bot.command('start', (ctx) => this.safeHandle(ctx, async () => {
       await ctx.reply(buildStartMessage());
-    });
+    }));
 
-    this.bot.command(['help', 'hepl'], async (ctx) => {
+    this.bot.command(['help', 'hepl'], (ctx) => this.safeHandle(ctx, async () => {
       const topic = commandArgs(ctx)[0]?.toLowerCase();
       if (topic === 'portfolio' || topic === 'портфель') {
         await ctx.reply(buildPortfolioHelpMessage());
         return;
       }
       await ctx.reply(buildHelpMessage(this.isAdmin(ctx)));
-    });
+    }));
 
     this.bot.command('add_bond', (ctx) => this.safeHandle(ctx, () => this.handleAddBond(ctx)));
     this.bot.command('edit_bond', (ctx) => this.safeHandle(ctx, () => this.handleEditBond(ctx)));
@@ -74,6 +76,15 @@ export class BotUpdateService implements OnModuleInit, OnApplicationShutdown {
     this.bot.command('portfolio', (ctx) => this.safeHandle(ctx, () => this.handlePortfolio(ctx)));
     this.bot.command('alert', (ctx) => this.safeHandle(ctx, () => this.handleAlert(ctx)));
     this.bot.command('fx_notify', (ctx) => this.safeHandle(ctx, () => this.handleFxNotify(ctx)));
+    this.bot.command('audit_logs', (ctx) => this.safeHandle(ctx, () => this.handleAuditLogs(ctx)));
+    this.bot.on('message:text', (ctx) => {
+      if (!ctx.message.text.trim().startsWith('/')) {
+        return;
+      }
+      return this.safeHandle(ctx, async () => {
+        throw new Error('Невідома команда. Використай /help.');
+      });
+    });
   }
 
   private async handleAddBond(ctx: Context): Promise<void> {
@@ -155,6 +166,40 @@ export class BotUpdateService implements OnModuleInit, OnApplicationShutdown {
     await ctx.reply(`⚙️ Daily job поставлено в чергу. Job ID: <code>${html(String(job.id ?? '-'))}</code>`, {
       parse_mode: 'HTML',
     });
+  }
+
+  private async handleAuditLogs(ctx: Context): Promise<void> {
+    this.assertAdmin(ctx);
+    const filters = parseAuditLogsArgs(commandArgs(ctx));
+    const logs = await this.auditLogs.listCommands(filters);
+    if (logs.length === 0) {
+      await ctx.reply('Audit logs порожні для цього фільтра.');
+      return;
+    }
+
+    const filterLine = [
+      `${filters.limit} останніх`,
+      filters.username ? `user=@${html(filters.username.replace(/^@/, ''))}` : undefined,
+      filters.status ? `status=${filters.status.toLowerCase()}` : undefined,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+
+    const lines = [
+      '<b>Audit logs</b>',
+      html(filterLine),
+      '',
+      ...logs.flatMap((log, index) => [
+        `<b>${index + 1}. ${log.createdAt.toISOString().replace('T', ' ').slice(0, 19)} UTC</b>`,
+        `${statusIcon(log.status)} <code>/${html(log.command)}</code> · ${formatAuditUser(log)}`,
+        `args: <code>${html(formatAuditArgs(log.args))}</code>`,
+        `duration: ${log.durationMs ?? '-'}ms`,
+        ...(log.errorMessage ? [`error: <code>${html(truncate(log.errorMessage, 180))}</code>`] : []),
+        '',
+      ]),
+    ];
+
+    await ctx.reply(lines.join('\n').slice(0, 3900), { parse_mode: 'HTML' });
   }
 
   private async handleBuy(ctx: Context): Promise<void> {
@@ -356,11 +401,48 @@ export class BotUpdateService implements OnModuleInit, OnApplicationShutdown {
   }
 
   private async safeHandle(ctx: Context, handler: () => Promise<void>): Promise<void> {
+    const startedAt = Date.now();
+    let status: 'SUCCESS' | 'FAILURE' = 'SUCCESS';
+    let errorMessage: string | undefined;
     try {
       await handler();
     } catch (error) {
-      this.logger.error('Telegram command failed', error instanceof Error ? error.stack : String(error));
+      status = 'FAILURE';
+      errorMessage = error instanceof Error ? error.message : String(error);
+      if (isExpectedCommandError(error)) {
+        this.logger.warn(`Telegram command rejected: ${errorMessage}`);
+      } else {
+        this.logger.error('Telegram command failed', error instanceof Error ? error.stack : String(error));
+      }
       await ctx.reply(`⚠️ Помилка: ${toPublicErrorMessage(error, { isAdmin: this.isAdmin(ctx) })}`);
+    } finally {
+      await this.recordCommandAudit(ctx, status, Date.now() - startedAt, errorMessage);
+    }
+  }
+
+  private async recordCommandAudit(
+    ctx: Context,
+    status: 'SUCCESS' | 'FAILURE',
+    durationMs: number,
+    errorMessage?: string,
+  ): Promise<void> {
+    try {
+      await this.auditLogs.recordCommand({
+        updateId: BigInt(ctx.update.update_id),
+        messageId: ctx.message?.message_id,
+        telegramUserId: ctx.from?.id ? BigInt(ctx.from.id) : undefined,
+        chatId: ctx.chat?.id ? BigInt(ctx.chat.id) : undefined,
+        username: ctx.from?.username,
+        firstName: ctx.from?.first_name,
+        lastName: ctx.from?.last_name,
+        command: parseCommandName(ctx),
+        args: commandArgs(ctx),
+        status,
+        errorMessage,
+        durationMs,
+      });
+    } catch (auditError) {
+      this.logger.warn(`Failed to write command audit log: ${auditError instanceof Error ? auditError.message : String(auditError)}`);
     }
   }
 
@@ -416,3 +498,125 @@ function parseCloseBuyArgs(args: string[]): {
 function isIsoDateArg(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
+
+function parseAuditLogsArgs(args: string[]): { limit: number; username?: string; status?: 'SUCCESS' | 'FAILURE' } {
+  let limit = 20;
+  let username: string | undefined;
+  let status: 'SUCCESS' | 'FAILURE' | undefined;
+
+  for (const arg of args) {
+    const [rawKey, rawValue] = arg.includes('=') ? arg.split('=', 2) : [undefined, arg];
+    const key = rawKey?.toLowerCase();
+    const value = rawValue.trim();
+    if (!value) {
+      continue;
+    }
+
+    if ((key === 'limit' || key === 'n') && /^\d+$/.test(value)) {
+      limit = parseAuditLimit(value);
+      continue;
+    }
+
+    if ((key === 'user' || key === 'username' || key === 'nick') && value) {
+      username = value.replace(/^@/, '');
+      continue;
+    }
+
+    if (key === 'status') {
+      status = parseAuditStatus(value);
+      continue;
+    }
+
+    if (/^\d+$/.test(value)) {
+      limit = parseAuditLimit(value);
+      continue;
+    }
+
+    const parsedStatus = parseAuditStatusOrUndefined(value);
+    if (parsedStatus) {
+      status = parsedStatus;
+      continue;
+    }
+
+    if (value.startsWith('@') || /^[a-zA-Z0-9_]{3,32}$/.test(value)) {
+      username = value.replace(/^@/, '');
+      continue;
+    }
+
+    throw new Error('Використання: /audit_logs [limit] [@username] [success|failure]');
+  }
+
+  return { limit, username, status };
+}
+
+function parseAuditLimit(value: string): number {
+  const limit = Number(value);
+  if (!Number.isInteger(limit) || limit <= 0 || limit > 50) {
+    throw new Error('Використання: /audit_logs [limit до 50] [@username] [success|failure]');
+  }
+  return limit;
+}
+
+function parseAuditStatus(value: string): 'SUCCESS' | 'FAILURE' {
+  const status = parseAuditStatusOrUndefined(value);
+  if (!status) {
+    throw new Error('Використання: /audit_logs [limit] [@username] [success|failure]');
+  }
+  return status;
+}
+
+function parseAuditStatusOrUndefined(value: string): 'SUCCESS' | 'FAILURE' | undefined {
+  const normalized = value.trim().toLowerCase();
+  if (['success', 'successful', 'ok', 'успішна', 'успішні', 'успіх'].includes(normalized)) {
+    return 'SUCCESS';
+  }
+  if (['failure', 'failed', 'fail', 'error', 'неуспішна', 'неуспішні', 'помилка'].includes(normalized)) {
+    return 'FAILURE';
+  }
+  return undefined;
+}
+
+function statusIcon(status: string): string {
+  return status === 'SUCCESS' ? '✅ SUCCESS' : '❌ FAILURE';
+}
+
+function formatAuditUser(log: {
+  username: string | null;
+  telegramUserId: bigint | null;
+  firstName: string | null;
+  lastName: string | null;
+}): string {
+  const username = log.username ? `@${html(log.username)}` : 'no_username';
+  const name = [log.firstName, log.lastName].filter(Boolean).join(' ');
+  const id = log.telegramUserId ? String(log.telegramUserId) : '-';
+  return `${username}${name ? ` (${html(name)})` : ''} · id=<code>${html(id)}</code>`;
+}
+
+function formatAuditArgs(value: unknown): string {
+  if (!Array.isArray(value) || value.length === 0) {
+    return '-';
+  }
+  return truncate(value.map((item) => String(item)).join(' '), 220);
+}
+
+function truncate(value: string, maxLength: number): string {
+  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
+}
+
+function parseCommandName(ctx: Context): string {
+  const text = ctx.message?.text ?? '';
+  const token = text.trim().split(/\s+/)[0] ?? '';
+  return token.replace(/^\//, '').split('@')[0]?.toLowerCase() || 'unknown';
+}
+
+function isExpectedCommandError(error: unknown): boolean {
+  if (error instanceof HttpException) {
+    return error.getStatus() < 500;
+  }
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return EXPECTED_COMMAND_ERROR_PATTERNS.some((pattern) => pattern.test(error.message));
+}
+
+const EXPECTED_COMMAND_ERROR_PATTERNS = [/^Використання:/, /^Ця команда /, /^ISIN /, /^Невідома команда\./];

@@ -29,6 +29,7 @@ const SAFE_MESSAGE_PATTERNS = [
   /^coupon облігації /,
   /^Telegram user /,
   /^Telegram користувач /,
+  /^Невідома команда\./,
 ];
 
 export function toPublicErrorMessage(error: unknown, options?: { isAdmin?: boolean }): string {

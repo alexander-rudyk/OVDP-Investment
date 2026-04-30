@@ -106,6 +106,11 @@ export function buildHelpMessage(isAdmin: boolean): string {
       '⚙️ Ручний запуск daily job',
       '/run_daily_job',
       'Запускає оновлення FX, maturity handling і перевірку алертів.',
+      '',
+      '🧾 Audit logs',
+      '/audit_logs [limit] [@username] [success|failure]',
+      '/audit_logs n=20 user=@username status=failure',
+      'Показує останні команди. Максимальний limit — 50.',
     );
   }
 

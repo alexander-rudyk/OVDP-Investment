@@ -8,6 +8,8 @@ export interface AppConfig {
   TELEGRAM_BOT_MODE: 'polling' | 'disabled';
   TELEGRAM_ADMIN_USER_IDS: string;
   NBU_API_URL: string;
+  AUDIT_LOG_RETENTION_DAYS: number;
+  AUDIT_LOG_MAX_ROWS: number;
   PORT: number;
 }
 
@@ -33,6 +35,18 @@ export function validateConfig(env: RawEnv): AppConfig {
     TELEGRAM_BOT_MODE: botMode,
     TELEGRAM_ADMIN_USER_IDS: adminUserIds,
     NBU_API_URL: nbuApiUrl,
+    AUDIT_LOG_RETENTION_DAYS: parsePositiveIntWithDefault(
+      env.AUDIT_LOG_RETENTION_DAYS,
+      '90',
+      'AUDIT_LOG_RETENTION_DAYS',
+      3650,
+    ),
+    AUDIT_LOG_MAX_ROWS: parsePositiveIntWithDefault(
+      env.AUDIT_LOG_MAX_ROWS,
+      '50000',
+      'AUDIT_LOG_MAX_ROWS',
+      10_000_000,
+    ),
     PORT: port,
   };
 }
@@ -64,4 +78,17 @@ function validateAdminUserIds(value: string): void {
   if (invalid.length > 0) {
     throw new Error('TELEGRAM_ADMIN_USER_IDS must be a comma-separated list of Telegram numeric user ids');
   }
+}
+
+function parsePositiveInt(value: string, name: string, max: number): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > max) {
+    throw new Error(`${name} must be a positive integer up to ${max}`);
+  }
+  return parsed;
+}
+
+function parsePositiveIntWithDefault(value: string | undefined, defaultValue: string, name: string, max: number): number {
+  const effectiveValue = value?.trim() ? value : defaultValue;
+  return parsePositiveInt(effectiveValue, name, max);
 }

@@ -43,29 +43,29 @@ model Bond {
 }
 
 model Purchase {
-  id                    String    @id @default(cuid())
-  telegramUserId        BigInt    @map("telegram_user_id")
-  chatId                BigInt    @map("chat_id")
-  bondId                String    @map("bond_id")
-  bond                  Bond      @relation(fields: [bondId], references: [id], onDelete: Restrict)
-  quantity              Int
-  priceUah              Decimal   @map("price_uah") @db.Decimal(18, 4)
-  commissionUah         Decimal   @map("commission_uah") @db.Decimal(18, 4)
-  totalUah              Decimal   @map("total_uah") @db.Decimal(18, 4)
-  usdRateAtPurchase     Decimal   @map("usd_rate_at_purchase") @db.Decimal(18, 8)
-  totalUsdAtPurchase    Decimal   @map("total_usd_at_purchase") @db.Decimal(18, 8)
-  purchaseDate          DateTime  @default(now()) @map("purchase_date")
-  status                PurchaseStatus @default(ACTIVE)
-  closedAt              DateTime? @map("closed_at")
-  deletedAt             DateTime? @map("deleted_at")
-  maturedAt             DateTime? @map("matured_at")
-  finalUsdRate          Decimal?  @map("final_usd_rate") @db.Decimal(18, 8)
-  finalReceivedUah      Decimal?  @map("final_received_uah") @db.Decimal(18, 4)
-  finalReceivedUsd      Decimal?  @map("final_received_usd") @db.Decimal(18, 8)
-  finalProfitUah        Decimal?  @map("final_profit_uah") @db.Decimal(18, 4)
-  finalProfitUsd        Decimal?  @map("final_profit_usd") @db.Decimal(18, 8)
-  createdAt             DateTime  @default(now()) @map("created_at")
-  updatedAt             DateTime  @updatedAt @map("updated_at")
+  id                 String         @id @default(cuid())
+  telegramUserId     BigInt         @map("telegram_user_id")
+  chatId             BigInt         @map("chat_id")
+  bondId             String         @map("bond_id")
+  bond               Bond           @relation(fields: [bondId], references: [id], onDelete: Restrict)
+  quantity           Int
+  priceUah           Decimal        @map("price_uah") @db.Decimal(18, 4)
+  commissionUah      Decimal        @map("commission_uah") @db.Decimal(18, 4)
+  totalUah           Decimal        @map("total_uah") @db.Decimal(18, 4)
+  usdRateAtPurchase  Decimal        @map("usd_rate_at_purchase") @db.Decimal(18, 8)
+  totalUsdAtPurchase Decimal        @map("total_usd_at_purchase") @db.Decimal(18, 8)
+  purchaseDate       DateTime       @default(now()) @map("purchase_date")
+  status             PurchaseStatus @default(ACTIVE)
+  closedAt           DateTime?      @map("closed_at")
+  deletedAt          DateTime?      @map("deleted_at")
+  maturedAt          DateTime?      @map("matured_at")
+  finalUsdRate       Decimal?       @map("final_usd_rate") @db.Decimal(18, 8)
+  finalReceivedUah   Decimal?       @map("final_received_uah") @db.Decimal(18, 4)
+  finalReceivedUsd   Decimal?       @map("final_received_usd") @db.Decimal(18, 8)
+  finalProfitUah     Decimal?       @map("final_profit_uah") @db.Decimal(18, 4)
+  finalProfitUsd     Decimal?       @map("final_profit_usd") @db.Decimal(18, 8)
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
 
   @@index([telegramUserId])
   @@index([bondId])
@@ -87,14 +87,14 @@ model FxRate {
 }
 
 model Alert {
-  id                 String    @id @default(cuid())
-  telegramUserId     BigInt    @map("telegram_user_id")
-  chatId             BigInt    @map("chat_id")
-  usdLossPercent     Decimal   @map("usd_loss_percent") @db.Decimal(9, 4)
-  enabled            Boolean   @default(true)
-  lastTriggeredAt    DateTime? @map("last_triggered_at")
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
+  id              String    @id @default(cuid())
+  telegramUserId  BigInt    @map("telegram_user_id")
+  chatId          BigInt    @map("chat_id")
+  usdLossPercent  Decimal   @map("usd_loss_percent") @db.Decimal(9, 4)
+  enabled         Boolean   @default(true)
+  lastTriggeredAt DateTime? @map("last_triggered_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
   @@unique([telegramUserId, chatId])
   @@index([enabled])
@@ -116,4 +116,27 @@ model FxNotificationSetting {
   @@unique([telegramUserId, chatId])
   @@index([enabled, timeOfDay])
   @@map("fx_notification_settings")
+}
+
+model CommandAuditLog {
+  id             String   @id @default(cuid())
+  updateId       BigInt?  @map("update_id")
+  messageId      Int?     @map("message_id")
+  telegramUserId BigInt?  @map("telegram_user_id")
+  chatId         BigInt?  @map("chat_id")
+  username       String?
+  firstName      String?  @map("first_name")
+  lastName       String?  @map("last_name")
+  command        String   @db.VarChar(64)
+  args           Json     @default("[]") @db.JsonB
+  status         String   @db.VarChar(16)
+  errorMessage   String?  @map("error_message")
+  durationMs     Int?     @map("duration_ms")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([telegramUserId, createdAt])
+  @@index([chatId, createdAt])
+  @@index([command, createdAt])
+  @@index([createdAt])
+  @@map("command_audit_logs")
 }

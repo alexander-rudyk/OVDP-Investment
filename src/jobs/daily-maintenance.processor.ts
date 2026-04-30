@@ -1,6 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
+import { AuditLogsService } from '../audit/audit-logs.service';
 import { FxService } from '../fx/fx.service';
 import { AlertsService } from '../notifications/alerts.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -17,6 +18,7 @@ export class DailyMaintenanceProcessor extends WorkerHost {
     private readonly portfolio: PortfolioService,
     private readonly alerts: AlertsService,
     private readonly notifications: NotificationsService,
+    private readonly auditLogs: AuditLogsService,
   ) {
     super();
   }
@@ -35,6 +37,10 @@ export class DailyMaintenanceProcessor extends WorkerHost {
     }
 
     const alertCount = await this.alerts.triggerAlerts();
-    this.logger.log(`Daily maintenance complete: ${maturitySummaries.length} maturities, ${alertCount} alerts`);
+    const auditRotation = await this.auditLogs.rotate();
+    this.logger.log(
+      `Daily maintenance complete: ${maturitySummaries.length} maturities, ${alertCount} alerts, ` +
+        `${auditRotation.deletedOld + auditRotation.deletedOverflow} audit rows deleted`,
+    );
   }
 }
