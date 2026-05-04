@@ -1,19 +1,21 @@
 import { HttpException, Inject, Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Bot, Context } from 'grammy';
+import { Bot, Context, InlineKeyboard } from 'grammy';
 import { AuditLogsService } from '../audit/audit-logs.service';
 import { BondsService } from '../bonds/bonds.service';
 import { formatSignedUah, formatSignedUsd, formatUah, formatUsd } from '../common/decimal/money';
 import { DailyMaintenanceService } from '../jobs/daily-maintenance.service';
 import { AlertsService } from '../notifications/alerts.service';
 import { FxNotificationsService } from '../notifications/fx-notifications.service';
-import { PortfolioService } from '../portfolio/portfolio.service';
+import { PortfolioService, type PortfolioSnapshot } from '../portfolio/portfolio.service';
 import { PurchasesService } from '../purchases/purchases.service';
 import { commandArgs, requireTelegramIdentity } from './command-parser';
 import { GRAMMY_BOT } from './bot.tokens';
 import { buildHelpMessage, buildPortfolioHelpMessage, buildStartMessage } from './help-message';
 import { html } from './html';
 import { toPublicErrorMessage } from './public-error-message';
+
+const PORTFOLIO_PAGE_SIZE = 3;
 
 @Injectable()
 export class BotUpdateService implements OnModuleInit, OnApplicationShutdown {
@@ -35,7 +37,7 @@ export class BotUpdateService implements OnModuleInit, OnApplicationShutdown {
     this.registerHandlers();
     if (this.config.getOrThrow<string>('TELEGRAM_BOT_MODE') === 'polling') {
       void this.bot.start({
-        allowed_updates: ['message'],
+        allowed_updates: ['message', 'callback_query'],
         onStart: (botInfo) => this.logger.log(`Telegram bot @${botInfo.username} started`),
       });
     }
@@ -77,6 +79,11 @@ export class BotUpdateService implements OnModuleInit, OnApplicationShutdown {
     this.bot.command('alert', (ctx) => this.safeHandle(ctx, () => this.handleAlert(ctx)));
     this.bot.command('fx_notify', (ctx) => this.safeHandle(ctx, () => this.handleFxNotify(ctx)));
     this.bot.command('audit_logs', (ctx) => this.safeHandle(ctx, () => this.handleAuditLogs(ctx)));
+    this.bot.callbackQuery(/^portfolio:page:(\d+)$/, (ctx) =>
+      this.safeCallback(ctx, () => this.handlePortfolioPageCallback(ctx)),
+    );
+    this.bot.callbackQuery('portfolio:help', (ctx) => this.safeCallback(ctx, () => this.handlePortfolioHelpCallback(ctx)));
+    this.bot.callbackQuery('fx:settings', (ctx) => this.safeCallback(ctx, () => this.handleFxSettingsCallback(ctx)));
     this.bot.on('message:text', (ctx) => {
       if (!ctx.message.text.trim().startsWith('/')) {
         return;
@@ -232,34 +239,62 @@ export class BotUpdateService implements OnModuleInit, OnApplicationShutdown {
   private async handlePortfolio(ctx: Context): Promise<void> {
     const { telegramUserId } = requireTelegramIdentity(ctx);
     const snapshot = await this.portfolio.calculateForUser(telegramUserId);
-    if (snapshot.projections.length === 0) {
+    if (snapshot.bondAggregates.length === 0) {
       await ctx.reply('📭 Портфель порожній. Додай покупку через /buy.');
       return;
     }
 
-    const lines = [
-      '<b>Портфель ОВДП</b>',
-      `Курс: <b>${snapshot.rate.toDecimalPlaces(4).toFixed(4)} UAH/USD</b>`,
-      '',
-      ...snapshot.projections.flatMap((projection, index) => [
-        `<b>${index + 1}. ${html(projection.isin)} · ${projection.quantity} шт.</b>`,
-        `ID: <code>${html(projection.shortPurchaseId)}</code>`,
-        `Купівля: ${projection.purchaseDate.toISOString().slice(0, 10)}`,
-        `Погашення: ${projection.maturityDate.toISOString().slice(0, 10)}`,
-        `Інвестовано: ${formatUah(projection.totalUah)}`,
-        `Очікувана виплата: ${formatUah(projection.expectedTotalUah)} (${formatUsd(projection.expectedTotalUsd)})`,
-        `Якби купив USD: ${formatUsd(projection.usdHold)}`,
-        `Різниця до USD: <b>${formatSignedUsd(projection.deltaVsUsd)}</b> (${projection.deltaVsUsdPercent.toDecimalPlaces(2).toFixed(2)}% за весь період)`,
-        `Результат у UAH: <b>${formatSignedUah(projection.deltaVsUah)}</b>`,
+    const rendered = renderPortfolioSnapshot(snapshot, 0);
+    await ctx.reply(rendered.text, { parse_mode: 'HTML', reply_markup: rendered.keyboard });
+  }
+
+  private async handlePortfolioPageCallback(ctx: Context): Promise<void> {
+    const telegramUserId = ctx.from?.id;
+    if (!telegramUserId) {
+      await ctx.answerCallbackQuery({ text: 'Не бачу Telegram user id.' });
+      return;
+    }
+
+    const page = Number(/^portfolio:page:(\d+)$/.exec(ctx.callbackQuery?.data ?? '')?.[1] ?? 0);
+    const snapshot = await this.portfolio.calculateForUser(BigInt(telegramUserId));
+    if (snapshot.bondAggregates.length === 0) {
+      await ctx.answerCallbackQuery({ text: 'Портфель порожній.' });
+      return;
+    }
+
+    const rendered = renderPortfolioSnapshot(snapshot, page);
+    await ctx.editMessageText(rendered.text, { parse_mode: 'HTML', reply_markup: rendered.keyboard });
+    await ctx.answerCallbackQuery();
+  }
+
+  private async handlePortfolioHelpCallback(ctx: Context): Promise<void> {
+    await ctx.answerCallbackQuery();
+    await ctx.reply(buildPortfolioHelpMessage());
+  }
+
+  private async handleFxSettingsCallback(ctx: Context): Promise<void> {
+    if (!ctx.from?.id || !ctx.chat?.id) {
+      await ctx.answerCallbackQuery({ text: 'Не бачу Telegram user/chat id.' });
+      return;
+    }
+
+    const status = await this.fxNotifications.getStatus(BigInt(ctx.from.id), BigInt(ctx.chat.id));
+    await ctx.answerCallbackQuery();
+    await ctx.reply(
+      [
+        '<b>Daily FX notification</b>',
         '',
-      ]),
-      '<b>Разом</b>',
-      `Інвестовано: ${formatUah(snapshot.totals.investedUah)}`,
-      `Очікувано: ${formatUah(snapshot.totals.expectedTotalUah)} (${formatUsd(snapshot.totals.expectedTotalUsd)})`,
-      `Різниця до USD: <b>${formatSignedUsd(snapshot.totals.deltaVsUsd)}</b>`,
-      `Результат у UAH: <b>${formatSignedUah(snapshot.totals.deltaVsUah)}</b>`,
-    ];
-    await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
+        `Статус: ${status?.enabled ? 'увімкнено' : 'вимкнено'}`,
+        `Час: ${status?.timeOfDay ?? '09:00'} Europe/Kyiv`,
+        `Валюти: ${status?.currencies ?? 'USD,EUR'}`,
+        '',
+        '<b>Команди:</b>',
+        '<code>/fx_notify on 09:00 USD,EUR</code>',
+        '<code>/fx_notify off</code>',
+        '<code>/fx_notify status</code>',
+      ].join('\n'),
+      { parse_mode: 'HTML' },
+    );
   }
 
   private async handleEditBuy(ctx: Context): Promise<void> {
@@ -420,6 +455,15 @@ export class BotUpdateService implements OnModuleInit, OnApplicationShutdown {
     }
   }
 
+  private async safeCallback(ctx: Context, handler: () => Promise<void>): Promise<void> {
+    try {
+      await handler();
+    } catch (error) {
+      this.logger.error('Telegram callback failed', error instanceof Error ? error.stack : String(error));
+      await ctx.answerCallbackQuery({ text: 'Помилка. Спробуй ще раз.', show_alert: false });
+    }
+  }
+
   private async recordCommandAudit(
     ctx: Context,
     status: 'SUCCESS' | 'FAILURE',
@@ -475,6 +519,84 @@ function parseFxNotifyOnArgs(args: string[]): { timeOfDay: string; currencies: s
     return { timeOfDay: first, currencies: args[1] ?? 'USD,EUR' };
   }
   return { timeOfDay: '09:00', currencies: first };
+}
+
+function renderPortfolioSnapshot(snapshot: PortfolioSnapshot, requestedPage: number): { text: string; keyboard: InlineKeyboard } {
+  const totalPages = Math.max(1, Math.ceil(snapshot.bondAggregates.length / PORTFOLIO_PAGE_SIZE));
+  const page = Math.min(Math.max(0, requestedPage), totalPages - 1);
+  const from = page * PORTFOLIO_PAGE_SIZE;
+  const pageAggregates = snapshot.bondAggregates.slice(from, from + PORTFOLIO_PAGE_SIZE);
+  const firstItem = from + 1;
+  const lastItem = from + pageAggregates.length;
+  const separator = '━━━━━━━━━━━━━━';
+
+  const lines = [
+    '<b>Портфель ОВДП</b>',
+    `Курс: <b>${snapshot.rate.toDecimalPlaces(4).toFixed(4)} UAH/USD</b>`,
+    snapshot.bondAggregates.length > PORTFOLIO_PAGE_SIZE
+      ? `Показано: ${firstItem}-${lastItem} з ${snapshot.bondAggregates.length} ISIN`
+      : `ISIN: ${snapshot.bondAggregates.length}`,
+    '',
+    ...pageAggregates.flatMap((aggregate, index) => [
+      separator,
+      `<b>${from + index + 1}. ${html(aggregate.isin)} · ${aggregate.totalQuantity} шт.</b>`,
+      `Погашення: ${aggregate.maturityDate.toISOString().slice(0, 10)}`,
+      `Інвестовано: ${formatUah(aggregate.totalInvestedUAH)}`,
+      `Очікувана виплата: ${formatUah(aggregate.totalExpectedUAH)} (${formatUsd(aggregate.totalExpectedUSD)})`,
+      `Якби купив USD: ${formatUsd(aggregate.usdHoldTotal)}`,
+      `Різниця до USD: <b>${formatSignedUsd(aggregate.deltaVsUsd)}</b> (${aggregate.deltaVsUsdPercent.toDecimalPlaces(2).toFixed(2)}% за весь період)`,
+      `Результат у UAH: <b>${formatSignedUah(aggregate.deltaVsUah)}</b>`,
+      ...formatPurchaseBreakdown(aggregate.purchases),
+      '',
+    ]),
+    separator,
+    '<b>Разом</b>',
+    `Інвестовано: ${formatUah(snapshot.totals.investedUah)}`,
+    `Очікувано: ${formatUah(snapshot.totals.expectedTotalUah)} (${formatUsd(snapshot.totals.expectedTotalUsd)})`,
+    `Різниця до USD: <b>${formatSignedUsd(snapshot.totals.deltaVsUsd)}</b>`,
+    `Результат у UAH: <b>${formatSignedUah(snapshot.totals.deltaVsUah)}</b>`,
+  ];
+
+  return {
+    text: lines.join('\n'),
+    keyboard: portfolioKeyboard(page, totalPages),
+  };
+}
+
+function portfolioKeyboard(page: number, totalPages: number): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+  if (totalPages > 1) {
+    if (page > 0) {
+      keyboard.text('← Назад', `portfolio:page:${page - 1}`);
+    }
+    if (page < totalPages - 1) {
+      keyboard.text('Далі →', `portfolio:page:${page + 1}`);
+    }
+    keyboard.row();
+  }
+  return keyboard.text('ℹ️ Пояснення полів', 'portfolio:help');
+}
+
+function formatPurchaseBreakdown(purchases: PortfolioSnapshot['bondAggregates'][number]['purchases']): string[] {
+  const firstPurchase = purchases[0];
+  if (purchases.length <= 1) {
+    return [
+      `ID: <code>${html(firstPurchase?.shortPurchaseId ?? '-')}</code>`,
+      `Купівля: ${firstPurchase?.boughtAt.toISOString().slice(0, 10) ?? '-'}`,
+    ];
+  }
+
+  const visible = purchases.slice(0, 8);
+  const hiddenCount = purchases.length - visible.length;
+  return [
+    '',
+    '<i>Покупки:</i>',
+    ...visible.map(
+      (purchase) =>
+        `  └ <code>${html(purchase.shortPurchaseId)}</code> · ${purchase.quantity} шт. · ${purchase.boughtAt.toISOString().slice(0, 10)} · ${formatUah(purchase.investedUAH)}`,
+    ),
+    ...(hiddenCount > 0 ? [`  └ … ще ${hiddenCount}`] : []),
+  ];
 }
 
 function parseCloseBuyArgs(args: string[]): {

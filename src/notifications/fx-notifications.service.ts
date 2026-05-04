@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import Decimal from 'decimal.js';
+import { InlineKeyboard } from 'grammy';
 import { addDaysUtc, dateKey, parseIsoDate } from '../common/validation/dates';
 import { FxService, type SupportedCurrency } from '../fx/fx.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -94,7 +95,10 @@ export class FxNotificationsService {
     for (const setting of settings) {
       const currencies = parseCurrencies(setting.currencies);
       const text = await this.buildDailyMessage(currencies, today);
-      await this.notifications.sendMessage(setting.chatId, text, { parseMode: 'HTML' });
+      await this.notifications.sendMessage(setting.chatId, text, {
+        parseMode: 'HTML',
+        replyMarkup: new InlineKeyboard().text('⚙️ Налаштування', 'fx:settings'),
+      });
       await this.prisma.fxNotificationSetting.update({
         where: { id: setting.id },
         data: { lastSentForDate: today },

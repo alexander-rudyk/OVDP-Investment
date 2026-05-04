@@ -6,13 +6,17 @@ import { todayUtc } from '../common/validation/dates';
 import { FxService } from '../fx/fx.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PurchasesService } from '../purchases/purchases.service';
+import { PortfolioAggregateCalculator } from './calculators/portfolio-aggregate-calculator';
 import { PortfolioCalculator, type PurchaseProjection, type PurchaseWithBond } from './calculators/portfolio-calculator';
+import type { PortfolioBondAggregate } from './dto/portfolio-bond-aggregate.dto';
 
 export interface PortfolioSnapshot {
   rate: Decimal;
   projections: PurchaseProjection[];
+  bondAggregates: PortfolioBondAggregate[];
   totals: {
     investedUah: Decimal;
+    investedUsd: Decimal;
     expectedTotalUah: Decimal;
     expectedTotalUsd: Decimal;
     usdHold: Decimal;
@@ -35,6 +39,7 @@ export class PortfolioService {
     private readonly purchases: PurchasesService,
     private readonly fx: FxService,
     private readonly calculator: PortfolioCalculator,
+    private readonly aggregateCalculator: PortfolioAggregateCalculator,
   ) {}
 
   async calculateForUser(telegramUserId: bigint): Promise<PortfolioSnapshot> {
@@ -52,26 +57,10 @@ export class PortfolioService {
 
   calculateFromPurchases(purchases: PurchaseWithBond[], currentUsdRate: Decimal): PortfolioSnapshot {
     const projections = purchases.map((purchase) => this.calculator.calculatePurchase(purchase, currentUsdRate));
-    const totals = projections.reduce(
-      (acc, item) => ({
-        investedUah: acc.investedUah.plus(item.totalUah),
-        expectedTotalUah: acc.expectedTotalUah.plus(item.expectedTotalUah),
-        expectedTotalUsd: acc.expectedTotalUsd.plus(item.expectedTotalUsd),
-        usdHold: acc.usdHold.plus(item.usdHold),
-        deltaVsUsd: acc.deltaVsUsd.plus(item.deltaVsUsd),
-        deltaVsUah: acc.deltaVsUah.plus(item.deltaVsUah),
-      }),
-      {
-        investedUah: new Decimal(0),
-        expectedTotalUah: new Decimal(0),
-        expectedTotalUsd: new Decimal(0),
-        usdHold: new Decimal(0),
-        deltaVsUsd: new Decimal(0),
-        deltaVsUah: new Decimal(0),
-      },
-    );
+    const bondAggregates = this.aggregateCalculator.aggregateByIsin(projections);
+    const totals = this.aggregateCalculator.calculateTotals(bondAggregates);
 
-    return { rate: currentUsdRate, projections, totals };
+    return { rate: currentUsdRate, projections, bondAggregates, totals };
   }
 
   async handleMaturities(): Promise<MaturitySummary[]> {
