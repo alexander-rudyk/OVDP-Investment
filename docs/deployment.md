@@ -33,10 +33,17 @@ TELEGRAM_BOT_TOKEN=123456:replace-me
 TELEGRAM_BOT_MODE=polling
 TELEGRAM_ADMIN_USER_IDS=123456789
 NBU_API_URL=https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange
-AUDIT_LOG_RETENTION_DAYS=90
-AUDIT_LOG_MAX_ROWS=50000
 RUN_MIGRATIONS=true
 ```
+
+Optional audit retention variables:
+
+```env
+AUDIT_LOG_RETENTION_DAYS=90
+AUDIT_LOG_MAX_ROWS=50000
+```
+
+If omitted or left empty, the application uses those defaults.
 
 ## GHCR Access
 

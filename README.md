@@ -12,8 +12,9 @@ The project is built as a backend engineering portfolio piece: clean NestJS modu
 - Stores purchases with quantity, amount, commission, and purchase date.
 - Fetches historical USD/UAH and EUR/UAH rates from the NBU API.
 - Calculates expected payout, UAH result, and comparison against a USD-hold scenario.
+- Shows portfolio grouped by ISIN with per-purchase breakdown and inline pagination.
 - Supports full and partial early closure of a purchase.
-- Sends daily FX notifications with rate movement.
+- Sends daily FX notifications with rate movement and a settings shortcut button.
 - Sends alerts when the portfolio underperforms a configured USD threshold.
 - Handles bond maturity and sends final summaries.
 - Runs daily background maintenance jobs through BullMQ.
@@ -40,13 +41,13 @@ The application is split into focused modules:
 - `bonds`: manual bond registry, ISIN validation, admin-only registry operations
 - `purchases`: purchase tracking, editing, soft deletion, full and partial closure
 - `fx`: NBU exchange-rate fetch, Redis cache, historical rate storage
-- `portfolio`: deterministic payout and comparison calculations
+- `portfolio`: deterministic per-purchase calculations and view-level ISIN aggregation
 - `notifications`: Telegram delivery, FX notifications, portfolio alerts
 - `audit`: command usage audit logs and retention rotation
 - `bot`: grammY command handlers and user-facing formatting
 - `jobs`: BullMQ daily maintenance worker and scheduler
 
-The portfolio calculator is intentionally pure and testable. It does not read from the database, call Telegram, or fetch FX rates.
+The portfolio calculator is intentionally pure and testable. It does not read from the database, call Telegram, or fetch FX rates. ISIN grouping is view-level only: purchases are calculated separately first, then aggregated for display.
 
 More detail: [docs/architecture.md](./docs/architecture.md).
 
@@ -60,6 +61,8 @@ Bot messages are in Ukrainian. Run `/help` in Telegram for full command details 
 /help portfolio
 /portfolio
 ```
+
+`/portfolio` output is grouped by ISIN. Large portfolios are paginated with inline `Back` / `Next` buttons, and an `Info` button opens the field explanation.
 
 Purchase flow:
 
@@ -79,6 +82,8 @@ Alerts and FX notifications:
 /fx_notify status
 /fx_notify off
 ```
+
+Daily FX notifications include a settings shortcut button that shows current notification settings and command examples.
 
 Admin-only bond registry:
 
@@ -104,11 +109,25 @@ delta_vs_usd = expected_total_usd - usd_hold
 delta_vs_uah = expected_total_uah - total_uah
 ```
 
+The displayed portfolio groups projections by ISIN after these per-purchase calculations:
+
+```text
+total_quantity = sum(quantity)
+total_invested_uah = sum(total_uah)
+total_expected_uah = sum(expected_total_uah)
+total_invested_usd = sum(total_usd_at_purchase)
+total_expected_usd = sum(expected_total_usd)
+usd_hold_total = sum(usd_hold)
+delta_vs_usd = total_expected_usd - usd_hold_total
+delta_vs_uah = total_expected_uah - total_invested_uah
+```
+
 Important notes:
 
 - `amount_uah` is the full purchase amount for the deal, without commission.
 - `total_uah = amount_uah + commission_uah`.
 - The USD comparison is not guaranteed income; it is a scenario comparison at the current FX rate.
+- FX rates are never averaged for portfolio grouping. Each purchase keeps its own purchase-date FX rate.
 - Coupon payments are counted deterministically by walking backward from maturity using the registered coupon frequency.
 - All monetary calculations use `decimal.js`, never JavaScript floating point arithmetic.
 
@@ -166,8 +185,8 @@ See [.env.example](./.env.example).
 | `TELEGRAM_BOT_MODE` | `polling` or `disabled` |
 | `TELEGRAM_ADMIN_USER_IDS` | Comma-separated Telegram numeric user ids |
 | `NBU_API_URL` | NBU exchange API URL |
-| `AUDIT_LOG_RETENTION_DAYS` | Delete command audit logs older than this many days |
-| `AUDIT_LOG_MAX_ROWS` | Hard cap for command audit rows retained after rotation |
+| `AUDIT_LOG_RETENTION_DAYS` | Optional. Delete command audit logs older than this many days. Default: `90` |
+| `AUDIT_LOG_MAX_ROWS` | Optional. Hard cap for command audit rows retained after rotation. Default: `50000` |
 | `PORT` | HTTP server port |
 
 ## Database
@@ -239,7 +258,7 @@ npm run lint
 npm test -- --runInBand
 ```
 
-The test suite covers deterministic portfolio calculations, validation, public error mapping, FX notification parsing, and money formatting.
+The test suite covers deterministic portfolio calculations, ISIN aggregation, validation, public error mapping, FX notification parsing, and money formatting.
 
 ## Security
 

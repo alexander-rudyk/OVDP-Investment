@@ -9,7 +9,7 @@ src/
   bonds/           Manual OVDP registry and bond validation
   purchases/       Purchase lifecycle: buy, edit, delete, full/partial close
   fx/              NBU exchange rates, Redis cache, historical persistence
-  portfolio/       Pure calculation layer and portfolio snapshots
+  portfolio/       Pure calculation layer, ISIN aggregation, portfolio snapshots
   notifications/  Telegram delivery, alerts, daily FX notifications
   audit/           Telegram command audit logs and retention rotation
   bot/             grammY command handlers and message formatting
@@ -23,6 +23,7 @@ src/
 - Bond data is manual-only. No external bond registries are called.
 - Money is represented with `decimal.js` and persisted as PostgreSQL `Decimal`.
 - Portfolio calculations are isolated in `PortfolioCalculator`.
+- Portfolio ISIN grouping is view-level only. Purchases are never merged in the database.
 - Telegram handlers parse command arguments and delegate to services.
 - BullMQ handles background maintenance and alert workflows.
 - Redis is used for FX cache and BullMQ infrastructure.
@@ -57,6 +58,28 @@ Supported notification currencies:
 
 Portfolio comparisons currently use USD as the reference scenario.
 
+## Portfolio Aggregation
+
+The portfolio flow is intentionally two-stage:
+
+1. `PortfolioCalculator` calculates every active purchase independently.
+2. `PortfolioAggregateCalculator` groups those projections by ISIN for display.
+
+This means:
+
+- no purchase records are merged
+- no FX rates are averaged
+- deltas are calculated per purchase and then summed
+- breakdown rows can still show the individual purchases under each ISIN
+
+The Telegram `/portfolio` view renders up to three ISIN groups per page and uses inline callback buttons for pagination:
+
+```text
+← Назад
+Далі →
+ℹ️ Пояснення полів
+```
+
 ## Daily Maintenance
 
 The daily job:
@@ -67,6 +90,8 @@ The daily job:
 - sends maturity summaries
 - triggers portfolio alerts
 - rotates command audit logs by age and max row count
+
+Daily FX notifications use an inline settings shortcut button. The button does not mutate settings directly; it opens the current status and the `/fx_notify` command examples.
 
 ## Audit Logs
 
