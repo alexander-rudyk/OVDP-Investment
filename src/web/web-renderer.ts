@@ -42,8 +42,27 @@ export function renderDashboard(model: DashboardViewModel): string {
     .columns { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 16px; }
     .panel { padding: 18px; }
     .chart-panel { margin-bottom: 16px; }
-    .chart-wrap { width: 100%; overflow: hidden; }
-    .chart { display: block; width: 100%; height: auto; min-height: 250px; }
+    .chart-wrap { position: relative; width: 100%; overflow: hidden; }
+    .chart { display: block; width: 100%; height: auto; min-height: 250px; touch-action: none; }
+    .chart-tooltip {
+      position: absolute;
+      z-index: 2;
+      min-width: 160px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 10px 26px rgba(15, 23, 42, 0.16);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.45;
+      pointer-events: none;
+      transform: translate(12px, 12px);
+    }
+    .chart-tooltip[hidden] { display: none; }
+    .tooltip-date { font-weight: 800; margin-bottom: 4px; }
+    .tooltip-rate { display: flex; justify-content: space-between; gap: 18px; }
+    .tooltip-rate span:first-child { font-weight: 700; }
     .legend { display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0 14px; color: var(--muted); font-size: 13px; }
     .legend-item { display: inline-flex; align-items: center; gap: 6px; }
     .legend-swatch { width: 18px; height: 3px; border-radius: 999px; background: currentColor; }
@@ -108,6 +127,7 @@ export function renderDashboard(model: DashboardViewModel): string {
       <a href="/health">/health</a>
     </p>
   </main>
+${renderDashboardScript()}
 </body>
 </html>`;
 }
@@ -183,12 +203,36 @@ function renderRateChart(points: DashboardViewModel['rateHistory']): string {
 
   const firstDate = dates[0] ?? '';
   const lastDate = dates[dates.length - 1] ?? '';
+  const tooltipPoints = dates.map((date) => {
+    const valuesForDate = points.filter((point) => point.date === date);
+    return {
+      date,
+      x: x(date),
+      rates: valuesForDate.map((point) => ({
+        currency: point.currency,
+        rate: point.rate,
+        y: y(point.rate),
+      })),
+    };
+  });
 
-  return `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="USD and EUR exchange rate history">
+  return `<svg
+    class="chart"
+    viewBox="0 0 ${width} ${height}"
+    role="img"
+    aria-label="USD and EUR exchange rate history"
+    data-fx-chart
+    data-points="${escapeAttribute(JSON.stringify(tooltipPoints))}"
+  >
     <rect x="0" y="0" width="${width}" height="${height}" rx="8" fill="#ffffff" />
     ${grid}
     <line x1="${padding.left}" y1="${height - padding.bottom}" x2="${width - padding.right}" y2="${height - padding.bottom}" stroke="#aeb8c5" />
     ${lines}
+    <g data-chart-marker hidden>
+      <line data-marker-line x1="0" y1="${padding.top}" x2="0" y2="${height - padding.bottom}" stroke="#17202a" stroke-width="1" stroke-dasharray="4 4" opacity="0.45" />
+      <circle data-marker-usd cx="0" cy="0" r="4.5" fill="#ffffff" stroke="var(--blue)" stroke-width="3" hidden />
+      <circle data-marker-eur cx="0" cy="0" r="4.5" fill="#ffffff" stroke="var(--red)" stroke-width="3" hidden />
+    </g>
     <text x="${padding.left}" y="${height - 10}" font-size="12" fill="#637083">${escapeHtml(firstDate)}</text>
     <text x="${width - padding.right}" y="${height - 10}" text-anchor="end" font-size="12" fill="#637083">${escapeHtml(lastDate)}</text>
   </svg>`;
@@ -208,4 +252,87 @@ function escapeHtml(value: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+function escapeAttribute(value: string): string {
+  return escapeHtml(value).replace(/'/g, '&#39;');
+}
+
+function renderDashboardScript(): string {
+  return `<script>
+(() => {
+  const chart = document.querySelector('[data-fx-chart]');
+  if (!chart) {
+    return;
+  }
+
+  const wrap = chart.closest('.chart-wrap');
+  const points = JSON.parse(chart.dataset.points || '[]');
+  const marker = chart.querySelector('[data-chart-marker]');
+  const markerLine = chart.querySelector('[data-marker-line]');
+  const markerUsd = chart.querySelector('[data-marker-usd]');
+  const markerEur = chart.querySelector('[data-marker-eur]');
+  const tooltip = document.createElement('div');
+  tooltip.className = 'chart-tooltip';
+  tooltip.hidden = true;
+  wrap.appendChild(tooltip);
+
+  const formatRate = (rate) => Number(rate).toFixed(4);
+  const setCircle = (circle, ratePoint) => {
+    if (!circle) {
+      return;
+    }
+    if (!ratePoint) {
+      circle.setAttribute('hidden', '');
+      return;
+    }
+    circle.removeAttribute('hidden');
+    circle.setAttribute('cx', String(ratePoint.x));
+    circle.setAttribute('cy', String(ratePoint.y));
+  };
+
+  const hide = () => {
+    tooltip.hidden = true;
+    marker?.setAttribute('hidden', '');
+  };
+
+  chart.addEventListener('pointermove', (event) => {
+    if (!points.length || !wrap) {
+      return;
+    }
+
+    const chartRect = chart.getBoundingClientRect();
+    const viewX = ((event.clientX - chartRect.left) / chartRect.width) * chart.viewBox.baseVal.width;
+    const point = points.reduce((closest, item) =>
+      Math.abs(item.x - viewX) < Math.abs(closest.x - viewX) ? item : closest,
+    );
+
+    const usd = point.rates.find((item) => item.currency === 'USD');
+    const eur = point.rates.find((item) => item.currency === 'EUR');
+    tooltip.innerHTML = [
+      '<div class="tooltip-date">' + point.date + '</div>',
+      usd ? '<div class="tooltip-rate"><span>USD/UAH</span><strong>' + formatRate(usd.rate) + '</strong></div>' : '',
+      eur ? '<div class="tooltip-rate"><span>EUR/UAH</span><strong>' + formatRate(eur.rate) + '</strong></div>' : '',
+    ].join('');
+    tooltip.hidden = false;
+
+    marker?.removeAttribute('hidden');
+    markerLine?.setAttribute('x1', String(point.x));
+    markerLine?.setAttribute('x2', String(point.x));
+    setCircle(markerUsd, usd ? { x: point.x, y: usd.y } : null);
+    setCircle(markerEur, eur ? { x: point.x, y: eur.y } : null);
+
+    const wrapRect = wrap.getBoundingClientRect();
+    const left = event.clientX - wrapRect.left;
+    const top = event.clientY - wrapRect.top;
+    const maxLeft = Math.max(8, wrapRect.width - tooltip.offsetWidth - 24);
+    const maxTop = Math.max(8, wrapRect.height - tooltip.offsetHeight - 24);
+    tooltip.style.left = Math.min(Math.max(left, 8), maxLeft) + 'px';
+    tooltip.style.top = Math.min(Math.max(top, 8), maxTop) + 'px';
+  });
+
+  chart.addEventListener('pointerleave', hide);
+  chart.addEventListener('pointercancel', hide);
+})();
+</script>`;
 }
