@@ -14,6 +14,7 @@ src/
   audit/           Telegram command audit logs and retention rotation
   bot/             grammY command handlers and message formatting
   jobs/            BullMQ queues, processors, scheduled maintenance
+  web/             Server-rendered operational dashboard
   prisma/          Prisma client lifecycle
   common/          Shared validation, decimal helpers, Redis provider
 ```
@@ -28,6 +29,7 @@ src/
 - BullMQ handles background maintenance and alert workflows.
 - Redis is used for FX cache and BullMQ infrastructure.
 - Telegram command usage is recorded in `command_audit_logs` for operational visibility.
+- The built-in web dashboard is read-only and intentionally limited to operational counters, stored FX rate history, and public command hints.
 
 ## Purchase Lifecycle
 

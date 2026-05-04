@@ -19,6 +19,7 @@ The project is built as a backend engineering portfolio piece: clean NestJS modu
 - Handles bond maturity and sends final summaries.
 - Runs daily background maintenance jobs through BullMQ.
 - Stores Telegram command audit logs with automatic retention cleanup.
+- Exposes a small built-in NestJS web dashboard with operational counters and an FX rate chart.
 
 ## Tech Stack
 
@@ -46,6 +47,7 @@ The application is split into focused modules:
 - `audit`: command usage audit logs and retention rotation
 - `bot`: grammY command handlers and user-facing formatting
 - `jobs`: BullMQ daily maintenance worker and scheduler
+- `web`: server-rendered operational dashboard
 
 The portfolio calculator is intentionally pure and testable. It does not read from the database, call Telegram, or fetch FX rates. ISIN grouping is view-level only: purchases are calculated separately first, then aggregated for display.
 
@@ -172,6 +174,14 @@ Health endpoint:
 GET /health
 ```
 
+Web dashboard:
+
+```text
+GET /
+```
+
+The dashboard is read-only and shows operational counters, latest stored FX rates, a USD/EUR rate chart from stored NBU history, and key Telegram commands. It does not expose individual portfolios or personal financial data.
+
 ## Environment Variables
 
 See [.env.example](./.env.example).
@@ -223,6 +233,8 @@ docker compose -f docker-compose.portainer.yml up -d
 ```
 
 For Portainer, create a stack from [docker-compose.portainer.yml](./docker-compose.portainer.yml). The stack pulls the app image from GHCR by default.
+
+The same HTTP port serves the web dashboard at `/` and the healthcheck at `/health`.
 
 If the package is private, configure registry auth in Portainer:
 

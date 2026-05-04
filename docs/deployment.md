@@ -83,6 +83,14 @@ GET /health
 
 The Docker image and Portainer compose use this endpoint for healthchecks.
 
+The same HTTP server also exposes a small read-only dashboard:
+
+```text
+GET /
+```
+
+It shows operational counters, latest stored USD/EUR rates, and a compact FX history chart from persisted NBU rates.
+
 ## Operational Access
 
 Postgres is not exposed by default.

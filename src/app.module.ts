@@ -13,6 +13,7 @@ import { PortfolioModule } from './portfolio/portfolio.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { PurchasesModule } from './purchases/purchases.module';
 import { HealthController } from './health.controller';
+import { WebModule } from './web/web.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { HealthController } from './health.controller';
     NotificationsModule,
     BotModule,
     JobsModule,
+    WebModule,
   ],
   controllers: [HealthController],
 })
